@@ -1,2 +1,2 @@
 # RWPtools
-Some tools for Rossbz wave packets diagnostic
+Some tools for Rossby wave packets (RWPs) diagnostic
