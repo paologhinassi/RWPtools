@@ -30,6 +30,9 @@ exec(open("./LWA_additional.py").read())
 # colorbar repository
 exec(open("./colorbar.py").read())
 
+# plotting functions
+exec(open("./plot.py").read())
+
 # set the path for plotting
 plotdir = "./plots/"
 datadir = "/nas/reference/ERA5/daily/"
@@ -636,89 +639,6 @@ def local_wave_activity_box(isentropes, omega, sigma, lons, lats, Q, PV , PV_bin
 	#return the integral which is the local FAWA [time,theta,lat,lon]
 	return integ 
 
-"""""""""""""""""""""""""""
-		Plotting
-"""""""""""""""""""""""""""
-def plotPV(PV, isentropes, lats, lons, day1, time):
-
-	print ("Producing and saving the PV plots")
-
-	levels=[-8,-6,-4,-2,-1,-0.5,0.5,1,2,4,6,8]
-
-	dt_day=(time[1]-time[0])/24
-
-	# add cyclic point at lon 360
-	PV, lons = add_cyclic_point(PV, coord=lons)
-
-	for i in range (0, len (isentropes)):
-		validtime=day1
-		for j in range (0,len(time)):
-
-			ax = plt.axes(projection=ccrs.PlateCarree())
-
-			ax.set_global()
-
-			cs=plt.contourf(lons, lats, PV[j,i,:,:]*10**6, levels, cmap=plt.get_cmap('plasma'), extend ="both")
-
-			ax.coastlines()
-			ax.gridlines()
-
-			# Add Colorbar
-			cb = plt.colorbar(cs, orientation='horizontal', ticks=levels)#, labelsize=18)
-			cb.ax.tick_params(labelsize=14)
-			cb.set_label("PVU", fontsize=16)
-
-			# Add Title
-			plt.title('PV at %s K - %s UTC %s' %(int(isentropes[i]), validtime.strftime("%H%M"), validtime.strftime("%d %b %Y")), fontsize=12)
-
-			plt.savefig(plotdir + 'PV/PV_%sK_%sh.png' %(int(isentropes[i]), "%03d" %int(time[j])), bbox_inches='tight', dpi=350)
-		
-			plt.close()
-			
-			validtime+=timedelta(days=dt_day)
-
-	print ('figure saved')
-
-def plotLWA(A, isentropes, lats, lons, day1, time, title, name_savefig):
-
-	print(("Producing and saving the", title, "plots"))
-
-	levels=[0,50,75,100,150,200]
-
-	dt_day=(time[1]-time[0])/24
-
-	# add cyclic point at lon 360
-	A, lons = add_cyclic_point(A, coord=lons)
-
-	for i in range (0, len (isentropes)):
-		validtime=day1
-		for j in range (0,len(time)):
-
-			ax = plt.axes(projection=ccrs.PlateCarree())
-
-			ax.set_global()
-
-			cs=plt.contourf(lons, lats, A[j,i,:,:], levels, cmap=colormapLWA(), extend='max')
-
-			ax.coastlines()
-			ax.gridlines()
-
-			# Add Colorbar
-			cb = plt.colorbar(cs, orientation='horizontal')#, labelsize=18)
-			cb.ax.tick_params(labelsize=14)
-			cb.set_label(r"m s$^{-1}$", fontsize=16)
-
-			# Add Title
-			plt.title(title + ' at %s K - %s UTC %s' %(int(isentropes[i]), validtime.strftime("%H%M"), validtime.strftime("%d %b %Y")), fontsize=12)
-
-			plt.savefig(plotdir + 'LWA/' + name_savefig +'_%sK_%sh.png' %(int(isentropes[i]), "%03d" %int(time[j])), bbox_inches='tight', dpi=350)
-		
-			plt.close()
-			
-			validtime+=timedelta(days=dt_day)
-
-	print ('figure saved')
-
 
 """""""""""""""""""""""""""
 		MAIN
@@ -783,7 +703,7 @@ def main():
 
 	# plotting #
 
-	#plotPV(PV, isentropes, lats, lons, day1, time)
+	plotPV(PV, isentropes, lats, lons, day1, time)
 	plotLWA(A, isentropes, lats, lons, day1, time, title='LWA', name_savefig='LWA')
 	plotLWA(smoothA, isentropes, lats, lons, day1, time, title='Filtered LWA', name_savefig='filtLWA')
 
