@@ -13,7 +13,7 @@ Authors: Georgios Fragkoulidis, Paolo Ghinassi
 # modules to import  #
 ######################
 
-from __future__ import division
+
 from numpy import append, asarray, arange, array, argsort, arctanh, ceil, concatenate, conjugate, cos, diff, exp, intersect1d, isnan, isreal, log, log2, mod, ones, pi, prod, real, round, sort, sqrt, unique, zeros, polyval, nan, ma, floor, interp, loadtxt, savetxt, angle, argmax
 #from numpy.fft import fft, ifft, fftfreq
 from scipy import fft, ifft, arange
@@ -21,7 +21,6 @@ from scipy.signal import hann
 from scipy.fftpack import fftfreq, fftshift, rfft
 from numpy.random import randn
 from numpy.lib.polynomial import polyval
-from pylab import find
 from scipy.stats import chi2
 from scipy.special import gamma
 from scipy.signal import convolve2d, lfilter
@@ -391,12 +390,17 @@ def dom_wavenumber_2D (v, lons):
 
 	# width in the meridional set to 10 degrees of latitude
 
-	hann_merid = signal.hann(10/res)
+	hann_merid_width =10
+	hann_merid = signal.hann(hann_merid_width//res)
+
+	# width along the zonal set to 10 degrees of latitude
+
+	hann_zonal_width =40
 
 	for t in range(0,notime): 
 		for i in range(0,nolev): 
 			for lat_index in range(0,noLats): 
-				dom_wavenumber_2D[t,i,lat_index,:] = dom_wn(v[t,i,lat_index,:],input_smooth=True,output_smooth=True,hann_width_z=(40/res))
+				dom_wavenumber_2D[t,i,lat_index,:] = dom_wn(v[t,i,lat_index,:],input_smooth=True,output_smooth=True,hann_width_z=(hann_zonal_width//res))
 			for long_index in range(0,len(lons)):
 				dom_wavenumber_2D_smooth[t,i,:,long_index] = signal.convolve(dom_wavenumber_2D[t,i,:,long_index], hann_merid, mode='same') / sum(hann_merid)
 
@@ -432,7 +436,8 @@ def convolve_Hann_lon(arr1, lons, k):
 	arr1 = np.tile(arr1, 3)
 
 	#length of the convolution array 
-	nconv = len(arr1) + len(hann(len(lons)/k[-1]))
+
+	nconv = len(arr1) + len(hann(int(len(lons)/k[-1]+1)))		  #length of the convolution array 
 	conv = np.zeros(nconv)
 
 	# extend the zonal wavenumber array
@@ -441,11 +446,11 @@ def convolve_Hann_lon(arr1, lons, k):
 	if len(arr1) == 0:
 		raise ValueError('arr1 cannot be empty')
 
-	for i in xrange (0, nconv):
+	for i in range (0, nconv):
 		i1 = i
 		tmp = 0.0
-		arr2 = hann(len(lons)/k[i])
-		for j in xrange (0, len(arr2)):
+		arr2 = hann(int(len(lons)/k[i]+1))
+		for j in range (0, len(arr2)):
 		
 			if i1 >= 0 and i1 < len(arr1):
 				tmp = tmp + (arr1[i1]*arr2[j])
@@ -539,9 +544,9 @@ def zonalWN_fourier(signal, lats, lons):
 	maxWN = np.zeros([notime,nolev, len(lats)])
 
 	#loop over time, isentropes and latitudes
-	for t in xrange (0,notime):
-		for l in xrange (0,nolev):
-			for ilat in xrange(0,len(lats)):
+	for t in range (0,notime):
+		for l in range (0,nolev):
+			for ilat in range(0,len(lats)):
 				A[t,l,ilat,:] = pl.fft(signal[t,l,ilat,:]) # fourier transform of the signal (v) at each latitude
 				for kk in range(0,n):			       # exclude wavenumber 0
 					power[t,l,ilat,kk] = 4*(A[t,l,ilat,kk].real**2 + A[t,l,ilat,kk].imag**2)
@@ -560,8 +565,8 @@ def zonalWN_fourier(signal, lats, lons):
 
 	maxWN_mrunmean=np.zeros([notime, nolev, len(lats)])
 
-	for t in xrange (0,notime):
-		for l in xrange (0,nolev):
+	for t in range (0,notime):
+		for l in range (0,nolev):
 
 			maxWN_mrunmean[t,l,:] = np.convolve(maxWN[t,l,:], np.ones((N,))/N, mode='same')
 
@@ -605,9 +610,9 @@ def Hann_convolution(signal, lats, lons, maxWNRunMean, calibration):
 	nolev=signal.shape[1]
 
 
-	for t in xrange(0,notime):
-		for l in xrange (0,nolev):
-			for i in xrange(0,len(lats)):
+	for t in range(0,notime):
+		for l in range (0,nolev):
+			for i in range(0,len(lats)):
 			
 
 				# hann function with length (N*pi/max_zonal_wavenumber)
@@ -624,6 +629,30 @@ def Hann_convolution(signal, lats, lons, maxWNRunMean, calibration):
 
 	return smoothed_signal
 
+def hilbert(y):
+	"""
+	############################################################################################################################
+	- Envelope calculation using the Hilbert transform technique (Marple, 1999, Zimin et al 2003)
+	############################################################################################################################
+	- INPUT:
+		* y: 1-D function for which we want the envelope
+	############################################################################################################################
+	"""
+	N = len(y)
+	# FFT of y
+	z = fft(y)
+	# Zero-out the negative frequencies
+	z[(int(N/2)+1):N] = 0
+	# Double the positive frequencies except from the 0th and (N/2)th ones
+	z = 2*z
+	z[0] = z[0]/2
+	z[int(N/2)] = z[int(N/2)]/2
+	# Inverse FFT
+	z = ifft(z)
+	# Envelope
+	z = abs(z)
+	return z
+
 "Calculates the Fourier power spectrum of the signal"
 
 def fourierPower(signal):
@@ -639,6 +668,64 @@ def fourierPower(signal):
     for i in range(n):
         power[i] = 4*(A[i].real**2 + A[i].imag**2)
     return power
+
+def add_cyclic_point(data, coord=None, axis=-1):
+    """
+    Add a cyclic point to an array and optionally a corresponding
+    coordinate.
+
+    Args:
+
+    * data:
+        An n-dimensional array of data to add a cyclic point to.
+
+    Kwargs:
+
+    * coord:
+        A 1-dimensional array which specifies the coordinate values for
+        the dimension the cyclic point is to be added to. The coordinate
+        values must be regularly spaced.
+
+    * axis:
+        Specifies the axis of the data array to add the cyclic point to.
+        Defaults to the right-most axis.
+
+    Returns:
+
+    * cyclic_data:
+        The data array with a cyclic point added.
+
+    * cyclic_coord:
+        The coordinate with a cyclic point, only returned if the coord
+        keyword was supplied.
+
+  
+    """
+    if coord is not None:
+        if coord.ndim != 1:
+            raise ValueError('The coordinate must be 1-dimensional.')
+        if len(coord) != data.shape[axis]:
+            raise ValueError('The length of the coordinate does not match '
+                             'the size of the corresponding dimension of '
+                             'the data array: len(coord) = {}, '
+                             'data.shape[{}] = {}.'.format(
+                                 len(coord), axis, data.shape[axis]))
+        delta_coord = np.diff(coord)
+        if not np.allclose(delta_coord, delta_coord[0]):
+            raise ValueError('The coordinate must be equally spaced.')
+        new_coord = ma.concatenate((coord, coord[-1:] + delta_coord[0]))
+    slicer = [slice(None)] * data.ndim
+    try:
+        slicer[axis] = slice(0, 1)
+    except IndexError:
+        raise ValueError('The specified axis does not correspond to an '
+                         'array dimension.')
+    new_data = ma.concatenate((data, data[slicer]), axis=axis)
+    if coord is None:
+        return_value = new_data
+    else:
+        return_value = new_data, new_coord
+    return return_value
 
 
 

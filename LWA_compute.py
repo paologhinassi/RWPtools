@@ -5,14 +5,16 @@
 	tested with python 2.7
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
-from __future__ import division
+
 import datetime as dt
 from netCDF4 import Dataset, date2num
 from datetime import datetime, timedelta
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib as mpl
-from mpl_toolkits.basemap import Basemap, addcyclic, shiftgrid
+
+from cartopy import config
+import cartopy.crs as ccrs
 
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 	the execution of this file requires the files:
@@ -29,8 +31,8 @@ exec(open("./LWA_additional.py").read())
 exec(open("./colorbar.py").read())
 
 # set the path for plotting
-plotdir = "./Plots/"
-datadir = "./Data/"
+plotdir = "./plots/"
+datadir = "/nas/reference/ERA5/daily/"
 
 
 # some constants
@@ -44,29 +46,29 @@ g = 9.81    # constant gravitational acceleration [m/s^2]
 
 
 
-#read the netcdf file be careful that pressure has to INCREASE in the array, res specifies resolution in terms of grid points
+#read the netcdf file be careful that pressure has to INCREASE in the array and has to be in Pa, res specifies resolution in terms of grid points
 def read_data(space_res, time_res, y1, m1, d1, t1, y2, m2, d2, t2):
 
-	fh = Dataset(datadir + 'sample_april2011.nc','r')
-	lons = fh.variables['lon'][::space_res]
+	fh = Dataset(datadir + 'u/u_day_ERA5_201101_201112.nc','r')
+	lons = fh.variables['longitude'][::space_res]
 	#exclude +-90 degrees due to cos lat at the denominator later on
-	lats = fh.variables['lat'][1:90:space_res]
-	pressure = fh.variables['lev'][::-1]
+	lats = fh.variables['latitude'][1:-1:space_res]
+	pressure = fh.variables['level'][:]
 
 	# check if pressure is increasing: #
 
 	if np.all(np.diff(pressure) > 0):
-		print "pressure check ok"
+		print ("pressure check ok")
 	else:
-		print "pressure is not monotonically increasing in the array, the program is aborted!"
+		print ("pressure is not monotonically increasing in the array, the program is aborted!")
 		raise SystemExit
 
 	# check that latitude is decreasing and that there is no 90 deg due to cos phi at denominator: #
 
 	if np.all(np.diff(lats) < 0) and lats[0]<90:
-		print "latitude check ok"
+		print ("latitude check ok")
 	else:
-		print "Latitude must decrease and be <90 deg!"
+		print ("Latitude must decrease and be <90 deg!")
 		raise SystemExit
 
 
@@ -84,13 +86,20 @@ def read_data(space_res, time_res, y1, m1, d1, t1, y2, m2, d2, t2):
 	ts1=t_list.index(time_value1) # time index / timestep
 	ts2=t_list.index(time_value2)
 	
-	u = fh.variables['u'][ts1:ts2:time_res,::-1,1:90:space_res,::space_res] #zonal wind
-	v = fh.variables['v'][ts1:ts2:time_res,::-1,1:90:space_res,::space_res] #meridional wind
-	temperature = fh.variables['t'][ts1:ts2:time_res,::-1,1:90:space_res,::space_res]
-	fh.close()
-	
+	u = fh.variables['u'][ts1:ts2:time_res,:,1:-1:space_res,::space_res] #zonal wind
 
-	return lats, lons, pressure, u, v, temperature, time[ts1:ts2:time_res], day1
+	fh.close()
+
+	fh1 = Dataset(datadir + 'v/v_day_ERA5_201101_201112.nc','r')
+	v = fh1.variables['v'][ts1:ts2:time_res,:,1:-1:space_res,::space_res] #meridional wind
+	fh1.close()
+
+	fh2 = Dataset(datadir + 'temperature/temp_day_ERA5_201101_201112.nc','r')
+
+	temperature = fh2.variables['t'][ts1:ts2:time_res,:,1:-1:space_res,::space_res]
+	fh2.close()
+
+	return lats, lons, pressure*100, u, v, temperature, time[ts1:ts2:time_res], day1
 
 
 """""""""""""""""""""""""""
@@ -102,7 +111,7 @@ def read_data(space_res, time_res, y1, m1, d1, t1, y2, m2, d2, t2):
 def potential_temperature(temperature, pressure):
 	""" 
  	temperature = temperature. Shape must be [time,pressure,lat,lon] 
-	pressure = array with original pressure levels
+	pressure = array with original pressure levels. Check whether original pressure leveles are in PA/hPa!
 
 	returns
 
@@ -125,7 +134,7 @@ def remove_underground_isentropes(isentropes_old, pot_temp):
 	"""
 
 	ii=0
-	for i in xrange(0,len(isentropes_old)):
+	for i in range(0,len(isentropes_old)):
 		if isentropes_old[i]<np.max(pot_temp[:,-1,:,:]): #if it is true do
 			ii+=1
 
@@ -160,9 +169,9 @@ def velocities_isen(lats, lons, u, v, potential_temp, pressure, isentropes):
 	u_isen=np.zeros([notime,len(isentropes),noLats,noLons])
 	v_isen=np.zeros([notime,len(isentropes),noLats,noLons])
 
-	for t in xrange (0,notime):
-		for k in xrange (0,noLats):
-			for h in xrange (0,noLons):
+	for t in range (0,notime):
+		for k in range (0,noLats):
+			for h in range (0,noLons):
 				pisen[t,:,k,h]=np.interp(isentropes, potential_temp[t,::-1,k,h], pressure[::-1])
 				u_isen[t,:,k,h]=np.interp(pisen[t,:,k,h], pressure, u[t,:,k,h])
 				v_isen[t,:,k,h]=np.interp(pisen[t,:,k,h], pressure, v[t,:,k,h])
@@ -195,12 +204,12 @@ def absolutevorticity(u, v, lons, lats, isentropes):
 	u=np.append(u, u[:,:,:,0:2], axis=3) 
 	v=np.append(v, v[:,:,:,0:2], axis=3) 
 	dlambda=(lons[1]-lons[0])*np.pi/180
-	for k in xrange (1,noLats-1):
-		for h in xrange (1,noLons+1):
+	for k in range (1,noLats-1):
+		for h in range (1,noLons+1):
 			rel_vort[:,:,k,h]= (1/(a*np.cos(lats[k]*np.pi/180)))*(((v[:,:,k,h+1]-v[:,:,k,h-1]))/(2*dlambda)-(u[:,:,k+1,h]*np.cos(lats[k+1]*np.pi/180)-u[:,:,k-1,h]*np.cos(lats[k-1]*np.pi/180))/((lats[k+1]-lats[k-1])*np.pi/180))
 	
 	#set the boundaries for latitude using FW-BW in space
-	for h in xrange (1,noLons+1):
+	for h in range (1,noLons+1):
 		rel_vort[:,:,0,h]= (1/(a*np.cos(lats[0]*np.pi/180)))*(((v[:,:,0,h+1]-v[:,:,0,h-1]))/(2*dlambda)-(u[:,:,1,h]*np.cos(lats[1]*np.pi/180)-u[:,:,0,h]*np.cos(lats[0]*np.pi/180))/((lats[1]-lats[0])*np.pi/180))
 		rel_vort[:,:,-1,h]= (1/(a*np.cos(lats[-1]*np.pi/180)))*(((v[:,:,-1,h+1]-v[:,:,-1,h-1]))/(2*dlambda)-(u[:,:,-2,h]*np.cos(lats[-2]*np.pi/180)-u[:,:,-1,h]*np.cos(lats[-1]*np.pi/180))/(abs(lats[-2]-lats[-1])*np.pi/180))
 	
@@ -249,9 +258,9 @@ def compute_sigma (pressure, potential_temp, isentropes):
 
 	# calculate the gradient isentropic coordinates using interpolation
 
-	for t in xrange (0,notime):
-		for k in xrange (0,noLats):
-			for h in xrange (0,noLons):
+	for t in range (0,notime):
+		for k in range (0,noLats):
+			for h in range (0,noLons):
 				pisen[t,:,k,h]=np.interp(isentropes, potential_temp[t,::-1,k,h], pressure[::-1])	# remember that values in x arrays have to increase
 				dpdtheta_isen[t,:,k,h]=np.interp(pisen[t,:,k,h], pressure, dpdtheta[t,:,k,h])   																					
 
@@ -287,7 +296,7 @@ def compute_PV (omega, sigma):
 
 #compute the PV contours Q associated to the grid latutudes that are also the equivalent latitudes
 
-def PV_contours(PV, sigma, lons, lats, isentropes):
+def PV_contours_trap(PV, sigma, lons, lats, isentropes):
 	""" 
 	PV = potential vorticity in isentropic coord. Shape is [time,theta,lat,lon].
 	sigma = isentropic layer density in isentropic coord. Shape is [time,theta,lat,lon].
@@ -303,14 +312,17 @@ def PV_contours(PV, sigma, lons, lats, isentropes):
 
 	NOTE: in this version of the code equivalent latitude are computed just for a matter of interpolation to find Q_interp.
 		  grid latitudes are used as eq. latitudes then Q_interp are the Q contours associated to grid lats.
+		  version in which the integrals are computed using the trapezoidal rule
 
 	"""
 
 	noLats = PV.shape[2]
 	noLons = PV.shape[3]
 	notime = PV.shape[0]
+
+	dphi=abs(lats[0]-lats[1])*np.pi/180
+	dlambda=(lons[1]-lons[0])*np.pi/180
 	
-	sigma, lons = addcyclic(sigma, lons)
 	PV_bins=noLats
 	# initialise the integrals for INT 1
 	integ = np.zeros([notime,len(isentropes),PV_bins,noLons]) # initialise the integrals to 0
@@ -325,31 +337,31 @@ def PV_contours(PV, sigma, lons, lats, isentropes):
 	Q_interp=np.zeros([notime,len(isentropes), noLats])
 
 	### INT 1 ###
-	for t in xrange (0,notime):
-		for i in xrange(0, len(isentropes)):
+	for t in range (0,notime):
+		for i in range(0, len(isentropes)):
 			#prescribed PV contours (in PVU) for each isentropic surface from min to max of PV range of values
 			# NOTE: here q are set at each timestep, remove the t dependence if you want Qs to be constant for all times!
 			q[t,i]=np.linspace(np.nanmin(PV[t,i,:,:]), np.nanmax(PV[t,i,:,:]), num=PV_bins, endpoint=True)
 
-			for j in xrange(0, PV_bins):
-				for h in xrange(0,noLons-1):		
-					for k in xrange(0,noLats-1):
+			for j in range(0, PV_bins):
+				for h in range(0,noLons):		
+					for k in range(0,noLats-1):
 			
 						if (PV[t,i,k,h]-q[t,i,j]) > 0 and (PV[t,i,k+1,h]-q[t,i,j]) > 0:  # if PV-q is positive at both grid points use trapezoidal rule to calculate the integral in dphi
 							#print 'a'
-							integ1 = 0.5*(sigma[t,i,k,h]+sigma[t,i,k+1,h])*(abs((lats[k]-lats[k+1])*np.pi/180))*np.cos((lats[k]+lats[k+1])*np.pi/360)*(abs((lons[h+1]-lons[h])*np.pi/180))*a**2
+							integ1 = 0.5*(sigma[t,i,k,h]+sigma[t,i,k+1,h])*(abs((lats[k]-lats[k+1])*np.pi/180))*np.cos((lats[k]+lats[k+1])*np.pi/360)*dlambda*a**2
 				
 						elif (PV[t,i,k,h]-q[t,i,j])*(PV[t,i,k+1,h]-q[t,i,j]) < 0 and (PV[t,i,k,h]-q[t,i,j])<(PV[t,i,k+1,h]-q[t,i,j]):
 							#print 'b'
 							phistar2 = np.interp(0, [(PV[t,i,k,h]-q[t,i,j]), (PV[t,i,k+1,h]-q[t,i,j])], [lats[k], lats[k+1]])
 							sigmastar = np.interp(phistar2, [lats[k+1], lats[k]], [sigma[t,i,k+1,h], sigma[t,i,k,h]])
-							integ2 = 0.5*(sigma[t,i,k+1,h]+sigmastar)*(abs((phistar2-lats[k+1])*np.pi/180))*np.cos((phistar2+lats[k+1])*np.pi/360)*(abs((lons[h+1]-lons[h])*np.pi/180))*a**2
+							integ2 = 0.5*(sigma[t,i,k+1,h]+sigmastar)*(abs((phistar2-lats[k+1])*np.pi/180))*np.cos((phistar2+lats[k+1])*np.pi/360)*dlambda*a**2
 
 						elif (PV[t,i,k,h]-q[t,i,j])*(PV[t,i,k+1,h]-q[t,i,j]) < 0 and (PV[t,i,k,h]-q[t,i,j])>(PV[t,i,k+1,h]-q[t,i,j]):
 							#print 'c'
 							phistar1 = np.interp(0, [(PV[t,i,k+1,h]-q[t,i,j]), (PV[t,i,k,h]-q[t,i,j])], [lats[k+1], lats[k]])
 							sigmastar = np.interp(phistar1, [lats[k+1], lats[k]], [sigma[t,i,k+1,h], sigma[t,i,k,h]])
-							integ3 = 0.5*(sigma[t,i,k,h]+sigmastar)*(abs((lats[k]-phistar1)*np.pi/180))*np.cos((phistar1+lats[k+1])*np.pi/360)*(abs((lons[h+1]-lons[h])*np.pi/180))*a**2
+							integ3 = 0.5*(sigma[t,i,k,h]+sigmastar)*(abs((lats[k]-phistar1)*np.pi/180))*np.cos((phistar1+lats[k+1])*np.pi/360)*dlambda*a**2
 				
 						integ[t,i,j,h] += integ1+integ2+integ3
 						integ1=integ2=integ3=0
@@ -358,16 +370,107 @@ def PV_contours(PV, sigma, lons, lats, isentropes):
 		
 		### INT 2 ###
 		# compute zonal mean at half grid points
-		sigma_zonal=np.zeros([notime,len(isentropes),noLats-1])
-		for k in xrange(0,noLats-1):
-			sigma_zonal[t,:,k]=(np.mean(sigma[t,:,k,:], axis=1)+np.mean(sigma[t,:,k+1,:], axis=1))/2
+		sigma_zonal=np.zeros([notime,len(isentropes),noLats])
+		for k in range(0,noLats-1):
+			sigma_zonal[t,:,k]=np.mean(sigma[t,:,k,:], axis=1)
 
-		for i in xrange (0, len(isentropes)):
-			for j in xrange(0, PV_bins):
-				for k in xrange(0,noLats-1):
+		for i in range (0, len(isentropes)):
+			for j in range(0, PV_bins):
+				for k in range(0,noLats):
 					if np.sum(int2[t,i,j,:]) < integral[t,i,j]:	
 						# compute the eulerian mean then integrate in dphi until int1=int2
-						integ_zonmean = 2*np.pi*a**2*sigma_zonal[t,i,k]*(abs((lats[k]-lats[k+1])*np.pi/180))*np.cos((lats[k]+lats[k+1])*np.pi/360)
+						integ_zonmean = 2*np.pi*a**2*sigma_zonal[t,i,k]*dphi*np.cos(lats[k]*np.pi/180)
+						int2[t,i,j,k] += integ_zonmean
+			
+					else:
+						break
+	
+				#interpolate to find the equivalent latitude
+				phiM[t,i,j] = np.interp(integral[t,i,j], [np.sum(int2[t,i,j,:(k-1)]), np.sum(int2[t,i,j,:k])], [lats[k-1], lats[k]])
+				
+				# set the values at the b'ries equal to lats
+				phiM[t,i,0]=lats[-1]
+				phiM[t,i,-1]=lats[0]
+		# now interpolate back to find the q values that corresponds to the original lats at given gridpoints
+		
+		for i in range (0, len(isentropes)):
+			Q_interp[t,i,:]=np.interp(lats[:], phiM[t,i,:], q[t,i,:])
+
+	return Q_interp, PV_bins, phiM
+
+#compute the PV contours Q associated to the grid latutudes that are also the equivalent latitudes
+
+def PV_contours_box(PV, sigma, lons, lats, isentropes):
+	""" 
+	PV = potential vorticity in isentropic coord. Shape is [time,theta,lat,lon].
+	sigma = isentropic layer density in isentropic coord. Shape is [time,theta,lat,lon].
+	isentropes = set of isentropes as vertical level (theta)
+	lons = longitudes from grid
+	lats = latitudes from grid 
+
+	returns
+
+	Q_interp = Array with PV contours associated to GRID latitudes. Shape is [time,theta,lat]
+	phi_M = equivalent latitudes. Shape is [time,theta,PV_bins]
+	PV_bins = scalar number equals to the number of prescribed PV contours. Here is set to be equal to len(lats)
+
+	NOTE: in this version of the code equivalent latitude are computed just for a matter of interpolation to find Q_interp.
+		  grid latitudes are used as eq. latitudes then Q_interp are the Q contours associated to grid lats.
+		  version in which the integrals are computed using the rectangular rule (conditional box counting)
+
+	"""
+
+	noLats = PV.shape[2]
+	noLons = PV.shape[3]
+	notime = PV.shape[0]
+	
+	dphi=abs(lats[0]-lats[1])*np.pi/180
+	dlambda=(lons[1]-lons[0])*np.pi/180
+	PV_bins=noLats
+	# initialise the integrals for INT 1
+	integ = np.zeros([notime,len(isentropes),PV_bins,noLons]) # initialise the integrals to 0
+	integral = np.zeros([notime,len(isentropes),PV_bins])
+	q = np.zeros([notime,len(isentropes),PV_bins])
+	integ1=0
+
+	# initialise the integrals for INT 2
+	int2 = np.zeros([notime,len(isentropes),PV_bins,noLats])
+	phiM = np.zeros([notime,len(isentropes),PV_bins])
+	integ_zonmean = 0
+	Q_interp=np.zeros([notime,len(isentropes), noLats])
+
+	### INT 1 ###
+	for t in range (0,notime):
+		for i in range(0, len(isentropes)):
+			#prescribed PV contours (in PVU) for each isentropic surface from min to max of PV range of values
+			# NOTE: here q are set at each timestep, remove the t dependence if you want Qs to be constant for all times!
+			q[t,i]=np.linspace(np.nanmin(PV[t,i,:,:]), np.nanmax(PV[t,i,:,:]), num=PV_bins, endpoint=True)
+
+			for j in range(0, PV_bins):
+				for h in range(0,noLons):		
+					for k in range(0,noLats):
+			
+						if (PV[t,i,k,h]-q[t,i,j]) > 0:
+							#print 'a'
+							integ1 = sigma[t,i,k,h]*a**2*dphi*dlambda*np.cos(lats[k]*np.pi/180)
+				
+						integ[t,i,j,h] += integ1
+						integ1=0
+	
+				integral[t,i,j]=np.sum(integ[t,i,j,:]) #integrate in dlambda
+		
+		### INT 2 ###
+		# compute zonal mean 
+		sigma_zonal=np.zeros([notime,len(isentropes),noLats])
+		for k in range(0,noLats):
+			sigma_zonal[t,:,k]=np.mean(sigma[t,:,k,:], axis=1)
+
+		for i in range (0, len(isentropes)):
+			for j in range(0, PV_bins):
+				for k in range(0,noLats-1):
+					if np.sum(int2[t,i,j,:]) < integral[t,i,j]:	
+						# compute the eulerian mean then integrate in dphi until int1=int2
+						integ_zonmean = 2*np.pi*a**2*sigma_zonal[t,i,k]*dphi*np.cos(lats[k]*np.pi/180)
 						int2[t,i,j,k] += integ_zonmean
 			
 					else:
@@ -376,12 +479,15 @@ def PV_contours(PV, sigma, lons, lats, isentropes):
 				#interpolate to find the equivalent latitude
 				phiM[t,i,j] = np.interp(integral[t,i,j], [np.sum(int2[t,i,j,:(k-1)]), np.sum(int2[t,i,j,:k])], [lats[k-1], lats[k]])
 
+			phiM[t,i,0]=lats[-1]
+			phiM[t,i,-1]=lats[0]
 		# now interpolate back to find the q values that corresponds to the original lats at given gridpoints
 		
-		for i in xrange (0, len(isentropes)):
+		for i in range (0, len(isentropes)):
 			Q_interp[t,i,:]=np.interp(lats[:], phiM[t,i,:], q[t,i,:])
 
 	return Q_interp, PV_bins, phiM
+
 
 
 # compute wave activity
@@ -390,7 +496,7 @@ def PV_contours(PV, sigma, lons, lats, isentropes):
 # Q_interp = array with the corresponding PV contours for each isentropic surface (time,noLev,noLats)
 # sigma = isentropic layer density (time, noIsentropes,noLats, noLons)
 
-def local_wave_activity (isentropes, omega, sigma, lons, lats, Q, PV , PV_bins):
+def local_wave_activity_trap(isentropes, omega, sigma, lons, lats, Q, PV , PV_bins):
 
 	""" 
 	isentropes = set of isentropes as vertical level (theta)
@@ -406,6 +512,7 @@ def local_wave_activity (isentropes, omega, sigma, lons, lats, Q, PV , PV_bins):
 	integ = Local Wave activity (LWA). Shape is [time,theta,lat,lon]
 	
 	NOTE: in this version of the code LWA is computed setting eq lats = grid lats
+		  version in which the integrals are computed using the trapezoidal rule
 	"""
 	noLats = PV.shape[2]
 	noLons = PV.shape[3]
@@ -417,11 +524,11 @@ def local_wave_activity (isentropes, omega, sigma, lons, lats, Q, PV , PV_bins):
 
 	integ = np.zeros([notime,len(isentropes),noLats,noLons])
 
-	for t in xrange (0, notime):
-		for i in xrange (0, len(isentropes)):
-			for j in xrange (0,PV_bins): #loop for equivalent latitudes, remeber lats=eq lats
-				for h in xrange(0,noLons):		
-					for k in xrange(0,noLats-1): #physical lat
+	for t in range (0, notime):
+		for i in range (0, len(isentropes)):
+			for j in range (0,PV_bins): #loop for equivalent latitudes, remeber lats=eq lats
+				for h in range(0,noLons):		
+					for k in range(0,noLats-1): #physical lat
 			
 						# compute the integrals on the area south to Phi_M									
 			
@@ -467,105 +574,150 @@ def local_wave_activity (isentropes, omega, sigma, lons, lats, Q, PV , PV_bins):
 	#return the integral which is the local FAWA [time,theta,lat,lon]
 	return integ 
 
+# lats = array with latitudes at grid points that are also the equivalent latitudes (noLats)
+# Q_interp = array with the corresponding PV contours for each isentropic surface (time,noLev,noLats)
+# sigma = isentropic layer density (time, noIsentropes,noLats, noLons)
+
+def local_wave_activity_box(isentropes, omega, sigma, lons, lats, Q, PV , PV_bins):
+
+	""" 
+	isentropes = set of isentropes as vertical level (theta)
+	omega = absolute vorticity in isentropic coord. Shape is [time,theta,lat,lon].
+	sigma = isentropic layer density in isentropic coord. Shape is [time,theta,lat,lon].
+	lons = longitudes from grid
+	lats = latitudes from grid 
+	Q = prescribed PV contours. Shape must be [time,theta,PV_bins]
+	PV = potential vorticity in isentropic coord. Shape must be [time,theta,lat,lon]
+	PV_bins= scalar number equals to the number of prescribed PV contours
+
+	returns
+	integ = Local Wave activity (LWA). Shape is [time,theta,lat,lon]
+	
+	NOTE: in this version of the code LWA is computed setting eq lats = grid lats
+		  version in which the integrals are computed using the rectangular rule (conditional box counting)
+	"""
+	noLats = PV.shape[2]
+	noLons = PV.shape[3]
+	notime = PV.shape[0]
+	dphi=abs(lats[0]-lats[1])*np.pi/180
+
+	phiM=lats #since eq lats and grid lats are coincident
+	
+	integ1=integ2=0
+
+	integ = np.zeros([notime,len(isentropes),noLats,noLons])
+
+	for t in range (0, notime):
+		for i in range (0, len(isentropes)):
+			for j in range (0,PV_bins): #loop for equivalent latitudes, remeber lats=eq lats
+				for h in range(0,noLons):		
+					for k in range(0,noLats): #physical lat
+			
+						# compute the integrals on the area south to Phi_M									
+			
+						if  lats[k] <= lats[j] and (PV[t,i,k,h]-Q[t,i,j]) > 0 :  
+							#print 'a'
+							integ1 = (1/np.cos(phiM[j]*np.pi/180))*(sigma[t,i,k,h]*(PV[t,i,k,h]-Q[t,i,j]))*dphi*a*np.cos(lats[k]*np.pi/180)
+				
+						
+						# then compute the integrals on the area north to Phi_M
+
+				
+						if  lats[k] > lats[j] and (PV[t,i,k,h]-Q[t,i,j]) <= 0:
+							#print 'd'
+							integ2 = (1/np.cos(phiM[j]*np.pi/180))*(sigma[t,i,k,h]*(Q[t,i,j]-PV[t,i,k,h]))*dphi*a*np.cos(lats[k]*np.pi/180)
+					
+					
+	
+						integ[t,i,j,h] += integ1+integ2
+				
+						integ1=integ2=0
+
+	#return the integral which is the local FAWA [time,theta,lat,lon]
+	return integ 
+
 """""""""""""""""""""""""""
 		Plotting
 """""""""""""""""""""""""""
+def plotPV(PV, isentropes, lats, lons, day1, time):
 
-	
-def ploteverytimestepWA(A, isentropes, lats, lons, day1, time):
+	print ("Producing and saving the PV plots")
 
-	print "Producing and saving the LWA plots"
-
-	levels=[0,50,75,100,150,200]
+	levels=[-8,-6,-4,-2,-1,-0.5,0.5,1,2,4,6,8]
 
 	dt_day=(time[1]-time[0])/24
 
-	m = Basemap(projection='cyl',lon_0=-91,llcrnrlon=-180,llcrnrlat=00, urcrnrlon=90, urcrnrlat=80, area_thresh=10000, resolution='c')
+	# add cyclic point at lon 360
+	PV, lons = add_cyclic_point(PV, coord=lons)
 
-	for i in xrange (0, len (isentropes)):
+	for i in range (0, len (isentropes)):
 		validtime=day1
-		for j in xrange (0,len(time)):
-			
-			# LWA
-			plt.figure()
-			A_shift, lons_shift = shiftgrid(90.,A[j,i,:,:],lons,start=False)
-			A_cyclic, lons_cyclic = addcyclic(A_shift, lons_shift)
-			#A_cyclic, lons_cyclic = addcyclic(A[j,i,:,:], lons)
-			lon, lat = np.meshgrid(lons_cyclic, lats)
-			xi, yi = m(lon, lat)
-			# Plot Data
-			cs = m.contourf(xi,yi,A_cyclic, levels, cmap=colormapLWA(), extend='max')
-			#csc = m.contour(xi,yi,A_cyclic, levels, colors='k')
+		for j in range (0,len(time)):
 
-			# Add Grid Lines  
-			m.drawparallels(np.arange(-80., 81., 10.), labels=[1,0,0,0], fontsize=10)
-			#plt.ylabel('Equivalent latitude', fontsize=10)
-			m.drawmeridians(np.arange(-180., 181., 60.), labels=[0,0,0,1], fontsize=10)
-			#add orography
-			m.drawcoastlines(linewidth=1)
-			#m.drawcountries(linewidth=1)
+			ax = plt.axes(projection=ccrs.PlateCarree())
+
+			ax.set_global()
+
+			cs=plt.contourf(lons, lats, PV[j,i,:,:]*10**6, levels, cmap=plt.get_cmap('plasma'), extend ="both")
+
+			ax.coastlines()
+			ax.gridlines()
+
 			# Add Colorbar
-			cbar = m.colorbar(cs, location='bottom', size='15%', pad="25%", ticks=levels)
-			cbar.set_label(r"m s$^{-1}$", fontsize=14)
-			cbar.ax.tick_params(labelsize=12) 
-			# Add Title
-			plt.title('LWA at %s K - %s UTC %s' %(int(isentropes[i]), validtime.strftime("%H%M"), validtime.strftime("%d %b %Y")), fontsize=12)
+			cb = plt.colorbar(cs, orientation='horizontal', ticks=levels)#, labelsize=18)
+			cb.ax.tick_params(labelsize=14)
+			cb.set_label("PVU", fontsize=16)
 
-			plt.savefig(plotdir + 'LWA/LWA_%sK_%sh.png' %(int(isentropes[i]), "%03d" %int(time[j])), bbox_inches='tight', dpi=350)
+			# Add Title
+			plt.title('PV at %s K - %s UTC %s' %(int(isentropes[i]), validtime.strftime("%H%M"), validtime.strftime("%d %b %Y")), fontsize=12)
+
+			plt.savefig(plotdir + 'PV/PV_%sK_%sh.png' %(int(isentropes[i]), "%03d" %int(time[j])), bbox_inches='tight', dpi=350)
 		
 			plt.close()
 			
 			validtime+=timedelta(days=dt_day)
 
-	print 'figure saved'
+	print ('figure saved')
 
-def ploteverytimestepWAsmooth(A, isentropes, lats, lons, day1, time):
+def plotLWA(A, isentropes, lats, lons, day1, time, title, name_savefig):
 
-	print "Producing and saving the filtered LWA plots"
+	print(("Producing and saving the", title, "plots"))
 
 	levels=[0,50,75,100,150,200]
 
 	dt_day=(time[1]-time[0])/24
 
-	m = Basemap(projection='cyl',lon_0=-91,llcrnrlon=-180,llcrnrlat=00, urcrnrlon=90, urcrnrlat=80, area_thresh=10000, resolution='c')
+	# add cyclic point at lon 360
+	A, lons = add_cyclic_point(A, coord=lons)
 
-	for i in xrange (0, len (isentropes)):
+	for i in range (0, len (isentropes)):
 		validtime=day1
-		for j in xrange (0,len(time)):
-			
-			# LWA
-			plt.figure()
-			A_shift, lons_shift = shiftgrid(90.,A[j,i,:,:],lons,start=False)
-			A_cyclic, lons_cyclic = addcyclic(A_shift, lons_shift)
-			#A_cyclic, lons_cyclic = addcyclic(A[j,i,:,:], lons)
-			lon, lat = np.meshgrid(lons_cyclic, lats)
-			xi, yi = m(lon, lat)
-			# Plot Data
-			cs = m.contourf(xi,yi,A_cyclic, levels, cmap=colormapLWA(), extend='max')
-			#csc = m.contour(xi,yi,A_cyclic, levels, colors='k')
+		for j in range (0,len(time)):
 
-			# Add Grid Lines  
-			m.drawparallels(np.arange(-80., 81., 10.), labels=[1,0,0,0], fontsize=10)
-			#plt.ylabel('Equivalent latitude', fontsize=10)
-			m.drawmeridians(np.arange(-180., 181., 60.), labels=[0,0,0,1], fontsize=10)
-			#add orography
-			m.drawcoastlines(linewidth=1)
-			#m.drawcountries(linewidth=1)
+			ax = plt.axes(projection=ccrs.PlateCarree())
+
+			ax.set_global()
+
+			cs=plt.contourf(lons, lats, A[j,i,:,:], levels, cmap=colormapLWA(), extend='max')
+
+			ax.coastlines()
+			ax.gridlines()
+
 			# Add Colorbar
-			#cbar = m.colorbar(cs, location='right', size='3%', pad='2%', ticks=levels)
-			cbar = m.colorbar(cs, location='bottom', size='15%', pad="25%", ticks=levels)
-			cbar.set_label(r"m s$^{-1}$", fontsize=14)
-			cbar.ax.tick_params(labelsize=12) 
-			# Add Title
-			plt.title('Filtered LWA at %s K - %s UTC %s' %(int(isentropes[i]), validtime.strftime("%H%M"), validtime.strftime("%d %b %Y")), fontsize=12)
+			cb = plt.colorbar(cs, orientation='horizontal')#, labelsize=18)
+			cb.ax.tick_params(labelsize=14)
+			cb.set_label(r"m s$^{-1}$", fontsize=16)
 
-			plt.savefig(plotdir + 'LWA/filtLWA_%sK_%sh.png' %(int(isentropes[i]), "%03d" %int(time[j])), bbox_inches='tight', dpi=350)
+			# Add Title
+			plt.title(title + ' at %s K - %s UTC %s' %(int(isentropes[i]), validtime.strftime("%H%M"), validtime.strftime("%d %b %Y")), fontsize=12)
+
+			plt.savefig(plotdir + 'LWA/' + name_savefig +'_%sK_%sh.png' %(int(isentropes[i]), "%03d" %int(time[j])), bbox_inches='tight', dpi=350)
 		
 			plt.close()
 			
 			validtime+=timedelta(days=dt_day)
 
-	print 'figure saved'
+	print ('figure saved')
 
 
 """""""""""""""""""""""""""
@@ -585,7 +737,7 @@ def main():
 	specify the start and end timestep in the format yr,month,date,time
 	sample file contanis 10-14 Apr 2011 with 6 hourly data on a 1x1 degree grid
 	"""
-	lats, lons, pressure, u, v, temperature, time, day1 = read_data(space_res=2, time_res=4, y1=2011, m1=4, d1=10, t1=00, y2=2011, m2=4, d2=14, t2=00) 
+	lats, lons, pressure, u, v, temperature, time, day1 = read_data(space_res=2, time_res=1, y1=2011, m1=4, d1=10, t1=00, y2=2011, m2=4, d2=14, t2=00) 
 
 	potential_temp=potential_temperature(temperature, pressure)
 	isentropes = remove_underground_isentropes(isentropes_old, potential_temp)
@@ -594,38 +746,46 @@ def main():
 	omega = absolutevorticity(u_isen, v_isen, lons, lats, isentropes)
 	sigma = compute_sigma(pressure, potential_temp, isentropes)
 	PV = compute_PV (omega, sigma)
-	Q_interp, PV_bins, phiM = PV_contours(PV, sigma, lons, lats, isentropes) #PV bins set the number of equispaced PV contours, now is taken as noLats
-	
+	Q_interp, PV_bins, phiM = PV_contours_trap(PV, sigma, lons, lats, isentropes) 
 
-	A = local_wave_activity(isentropes, omega, sigma, lons, lats, Q_interp, PV, PV_bins)
+	A = local_wave_activity_trap(isentropes, omega, sigma, lons, lats, Q_interp, PV, PV_bins)
 
-	# zonal filtering: choose the filter that you prefer #
+	# zonal filtering: choose the filter you prefer #
+
+	filter_type = "fourier"
 
 	"""  
 	method where the dominant zonal wavenumber is computed with fourier analysis at a latitude circle 
-	in this way the filter is linear and commutes with the gradient operator
+	in this way the filter is linear in longitude and commutes with the gradient operator. This property
+	is useful to preserve tthe conservation of LWA in its flux form (local E-P relation).
 
 	"""
 
-	maxWNRunMean = zonalWN_fourier(v_isen, lats, lons)
+	if filter_type=="fourier":
 
-	smoothA = Hann_convolution(A, lats, lons, maxWNRunMean, calibration = 1)
+		maxWNRunMean = zonalWN_fourier(v_isen, lats, lons) #dominant zonal wavenumber with Fourier analysis using meridional wind on isentropes
+		smoothA = Hann_convolution(A, lats, lons, maxWNRunMean, calibration = 1)
 
-	"""  
-	method where the dominant zonal wavenumber k is computed with wavelet analysis
-	and the width of Hann window depends on k. Note that the filtering operator is non linear and		
-	does not commute
-	with the gradient operator! 
-	"""
+		"""  
+		method where the local zonal wavenumber k is computed with wavelet analysis
+		and the width of Hann window depends on k. Note that the filtering operator is non linear and		
+		does not commute with the gradient operator! 
+		"""
 	
-	#k_2D = dom_wavenumber_2D(v_isen, lons)	#zonal wavenumber with wavelet analysis using meridional wind on isentropes
+	elif filter_type=="wavelet":
 
-	#smoothA = HannSmoothing_time_2D (A, lons, k_2D)
+		k_2D = dom_wavenumber_2D(v_isen, lons)	#LOCAL zonal wavenumber with wavelet analysis using meridional wind on isentropes
+		smoothA = HannSmoothing_time_2D (A, lons, k_2D)
+
+	else:
+
+		print("filter type not recognized!")
 
 	# plotting #
 
-	showplot_LWA=ploteverytimestepWA(A, isentropes, lats, lons, day1, time)
-	showplot_smoothLWA=ploteverytimestepWAsmooth(smoothA, isentropes, lats, lons, day1, time)
+	#plotPV(PV, isentropes, lats, lons, day1, time)
+	plotLWA(A, isentropes, lats, lons, day1, time, title='LWA', name_savefig='LWA')
+	plotLWA(smoothA, isentropes, lats, lons, day1, time, title='Filtered LWA', name_savefig='filtLWA')
 
 
 runthisprogram=main()
