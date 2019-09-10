@@ -36,6 +36,7 @@ exec(open("./plot.py").read())
 # set the path for plotting
 plotdir = "./plots/"
 datadir = "/nas/reference/ERA5/daily/"
+outputdir = "/nas/reference/ERA5/daily/LWA/"
 
 
 # some constants
@@ -102,7 +103,7 @@ def read_data(space_res, time_res, y1, m1, d1, t1, y2, m2, d2, t2):
 	temperature = fh2.variables['t'][ts1:ts2:time_res,:,1:-1:space_res,::space_res]
 	fh2.close()
 
-	return lats, lons, pressure*100, u, v, temperature, time[ts1:ts2:time_res], day1
+	return lats, lons, pressure*100, u, v, temperature, time[ts1:ts2:time_res], day1, time_units, cal_temps
 
 
 """""""""""""""""""""""""""
@@ -114,7 +115,7 @@ def read_data(space_res, time_res, y1, m1, d1, t1, y2, m2, d2, t2):
 def potential_temperature(temperature, pressure):
 	""" 
  	temperature = temperature. Shape must be [time,pressure,lat,lon] 
-	pressure = array with original pressure levels. Check whether original pressure leveles are in PA/hPa!
+	pressure = array with original pressure levels. Check whether original pressure levels are in PA/hPa!
 
 	returns
 
@@ -574,7 +575,7 @@ def local_wave_activity_trap(isentropes, omega, sigma, lons, lats, Q, PV , PV_bi
 				
 						integ1=integ2=integ3=integ4=integ5=integ6=0
 
-	#return the integral which is the local FAWA [time,theta,lat,lon]
+	#return the integral which is LWA [time,theta,lat,lon]
 	return integ 
 
 # lats = array with latitudes at grid points that are also the equivalent latitudes (noLats)
@@ -649,7 +650,7 @@ def main():
 	# set the isentropic levels 
 	# ideally it should intersect the tropopause in the midlatitudes
 
-	isentropes_old = [325]
+	isentropes_old = [320,325,330,335]
 
 	# get the data from file #
 	"""
@@ -657,7 +658,7 @@ def main():
 	specify the start and end timestep in the format yr,month,date,time
 	sample file contanis 10-14 Apr 2011 with 6 hourly data on a 1x1 degree grid
 	"""
-	lats, lons, pressure, u, v, temperature, time, day1 = read_data(space_res=2, time_res=1, y1=2011, m1=4, d1=10, t1=00, y2=2011, m2=4, d2=14, t2=00) 
+	lats, lons, pressure, u, v, temperature, time, day1, time_units, cal_temps = read_data(space_res=2, time_res=1, y1=2011, m1=1, d1=1, t1=00, y2=2011, m2=12, d2=31, t2=00) 
 
 	potential_temp=potential_temperature(temperature, pressure)
 	isentropes = remove_underground_isentropes(isentropes_old, potential_temp)
@@ -706,6 +707,15 @@ def main():
 	plotPV(PV, isentropes, lats, lons, day1, time)
 	plotLWA(A, isentropes, lats, lons, day1, time, title='LWA', name_savefig='LWA')
 	plotLWA(smoothA, isentropes, lats, lons, day1, time, title='Filtered LWA', name_savefig='filtLWA')
+
+	save_netcdf = True
+
+	if save_netcdf == True:
+
+		save4Dncfield(lats, lons, vert_lev= isentropes, lev_type='isentropes', variab = A, varname ='LWA', varunits = r"m s^${-1}$", \
+				  time_in = time, timeunits = time_units, time_cal = cal_temps , ofile = 'LWA_2011.nc', outdir = outputdir)
+		save4Dncfield(lats, lons, vert_lev= isentropes, lev_type='isentropes', variab = smoothA, varname ='filtLWA', varunits = r"m s^${-1}$", \
+		 		  time_in = time, timeunits = time_units, time_cal = cal_temps , ofile = 'filtLWA_2011.nc', outdir = outputdir)
 
 
 runthisprogram=main()

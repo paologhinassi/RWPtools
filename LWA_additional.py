@@ -12,7 +12,9 @@ Authors: Georgios Fragkoulidis, Paolo Ghinassi
 ######################
 # modules to import  #
 ######################
-
+import sys
+import os
+import netCDF4 as nc
 
 from numpy import append, asarray, arange, array, argsort, arctanh, ceil, concatenate, conjugate, cos, diff, exp, intersect1d, isnan, isreal, log, log2, mod, ones, pi, prod, real, round, sort, sqrt, unique, zeros, polyval, nan, ma, floor, interp, loadtxt, savetxt, angle, argmax
 #from numpy.fft import fft, ifft, fftfreq
@@ -28,7 +30,7 @@ from scipy.special.orthogonal import hermitenorm
 from os import makedirs
 from os.path import expanduser
 from sys import stdout
-from time import time
+from datetime import datetime
 from scipy import ndimage
 import numpy as np
 import pylab as pl
@@ -726,6 +728,75 @@ def add_cyclic_point(data, coord=None, axis=-1):
     else:
         return_value = new_data, new_coord
     return return_value
+
+def save4Dncfield(lats, lons, vert_lev, lev_type, variab, varname, varunits, time_in, time_cal, timeunits, ofile, outdir):
+    '''
+    GOAL
+        Save var in ofile netCDF file
+    USAGE
+        save4Dncfield(var,ofile) shape is [time, lev, lats, lons]
+        fname: output filname
+    '''
+    try:
+        os.remove(ofile) # Remove the outputfile
+    except OSError:
+        pass
+    dataset = nc.Dataset(outdir + ofile, 'w', format='NETCDF4_CLASSIC')
+    #print(dataset.file_format)
+
+    time = dataset.createDimension('time', None)
+    lev = dataset.createDimension('lev', variab.shape[1])
+    lat = dataset.createDimension('lat', variab.shape[2])
+    lon = dataset.createDimension('lon', variab.shape[3])
+
+    # Create coordinate variables for 3-dimensions
+    time = dataset.createVariable('time', np.float64, ('time',))
+    lev = dataset.createVariable('lev', np.float32, ('lev',))
+    lat = dataset.createVariable('lat', np.float32, ('lat',))
+    lon = dataset.createVariable('lon', np.float32, ('lon',))
+    # Create the actual 4-D variable
+    var = dataset.createVariable(varname, np.float64,('time','lev','lat','lon'))
+
+    #print('variable:', dataset.variables[varname])
+
+    #for varn in dataset.variables:
+    #    print(varn)
+    # Variable Attributes
+    time.units=timeunits
+    time.calendar=time_cal
+    lat.units='degree_north'
+    lon.units='degree_east'
+
+    if lev_type == 'pressure':
+        lev.units = 'hPa'
+    elif lev_type == 'isentropes':
+        lev.units = 'K'
+
+    else:
+        print ("vertical level type not recognized")
+
+    var.units = varunits
+
+    # Fill in times.
+    time[:] = time_in
+    print(time_cal)
+    print('time values (in units {0}): {1}'.format(timeunits,time[:]))
+
+
+    #print('time values (in units %s): ' % time)
+
+    lat[:]=lats
+    lon[:]=lons
+    lev[:] = vert_lev
+    var[:,:,:]=variab
+
+    dataset.close()
+
+    #----------------------------------------------------------------------------------------
+    print('The 4D field [time x lev x lat x lon] is saved as \n{0}'.format(ofile))
+    print('__________________________________________________________')
+    #----------------------------------------------------------------------------------------
+    return
 
 
 
